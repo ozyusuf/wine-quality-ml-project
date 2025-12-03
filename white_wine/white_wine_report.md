@@ -53,10 +53,10 @@ This significant class imbalance requires special handling through resampling te
 
 ### 1.4 Key Exploratory Data Analysis (EDA) Findings
 
-![EDA Visualizations](01_boxplot_features.png)
+![EDA Visualizations](outputs\01_boxplot_features.png)
 *Figure 1: Box plots showing distribution of all 12 features by quality class*
 
-![KDE Analysis](02_kde_critical_features.png)
+![KDE Analysis](outputs\02_kde_critical_features.png)
 *Figure 2: Kernel Density Estimation for critical features*
 
 #### 1.4.1 Strongest Positive Correlation: Alcohol Content
@@ -69,10 +69,10 @@ This significant class imbalance requires special handling through resampling te
 
 **Visual Evidence:**
 
-![Correlation Analysis](04_correlation_with_target.png)
+![Correlation Analysis](outputs\04_correlation_with_target.png)
 *Figure 3: Feature-target correlation coefficients (KEY FINDINGS)*
 
-![Correlation Heatmap](03_correlation_heatmap.png)
+![Correlation Heatmap](outputs\03_correlation_heatmap.png)
 *Figure 4: Complete feature correlation matrix*
 
 #### 1.4.2 Strongest Negative Correlation: Density
@@ -98,10 +98,10 @@ This significant class imbalance requires special handling through resampling te
 | 9 | Total SO₂ | -0.1622 | Negative ⬇️ |
 | 10 | Density | **-0.2839** | **Negative ⬇️** |
 
-![Detailed Analysis](05_detailed_histogram_analysis.png)
+![Detailed Analysis](outputs\05_detailed_histogram_analysis.png)
 *Figure 5: Detailed histogram distributions for key features*
 
-![Scatter Analysis](06_scatter_analysis.png)
+![Scatter Analysis](outputs\06_scatter_analysis.png)
 *Figure 6: Scatter plots showing feature relationships*
 
 ---
@@ -174,13 +174,13 @@ In wine quality assessment, missing a truly good wine (False Negative) is more c
 
 **Visual Evidence:**
 
-![SMOTE Before](07_class_distribution_before_smote.png)
+![SMOTE Before](outputs\07_class_distribution_before_smote.png)
 *Figure 7: Class distribution before SMOTE - Severe imbalance (3.62:1)*
 
-![SMOTE After](08_class_distribution_after_smote.png)
+![SMOTE After](outputs\08_class_distribution_after_smote.png)
 *Figure 8: Class distribution after SMOTE - Perfect balance (1:1)*
 
-![SMOTE Comparison](09_smote_comparison.png)
+![SMOTE Comparison](outputs\09_smote_comparison.png)
 *Figure 9: Side-by-side comparison of before and after SMOTE resampling*
 
 #### 2.2.3 Data Leakage Prevention
@@ -255,7 +255,7 @@ $$\begin{bmatrix} TN & FP \\ FN & TP \end{bmatrix} = \begin{bmatrix} 768 & 0 \\ 
 
 **Visual Evidence:**
 
-![Confusion Matrices](10_confusion_matrices_comparison.png)
+![Confusion Matrices](outputs\10_confusion_matrices_comparison.png)
 *Figure 10: Confusion matrices for all three models - Perfect predictions*
 
 ### 3.2 XGBoost Hyperparameter Optimization
@@ -313,10 +313,10 @@ $$\begin{bmatrix} 768 & 0 \\ 0 & 212 \end{bmatrix}$$
 
 **Visual Evidence:**
 
-![Model Metrics Comparison](11_model_metrics_comparison.png)
+![Model Metrics Comparison](outputs\11_model_metrics_comparison.png)
 *Figure 11: Bar charts comparing F1-Score and ROC-AUC across models*
 
-![Feature Importance](12_feature_importance_comparison.png)
+![Feature Importance](outputs\12_feature_importance_comparison.png)
 *Figure 12: Feature importance from Random Forest and XGBoost models*
 
 ---
@@ -343,7 +343,7 @@ All three models achieve identical ROC curves with AUC = 1.0000, indicating perf
 
 **Visual Evidence:**
 
-![ROC Curves](13_roc_curves_comparison.png)
+![ROC Curves](outputs\13_roc_curves_comparison.png)
 *Figure 13: ROC curves for all three models - Perfect separation (AUC = 1.0000)*
 
 ### 4.3 Selected Model Recommendation

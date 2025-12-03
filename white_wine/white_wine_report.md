@@ -53,7 +53,7 @@ This significant class imbalance requires special handling through resampling te
 
 ### 1.4 Key Exploratory Data Analysis (EDA) Findings
 
-![EDA Visualizations](outputs\01_boxplot_features.png)
+![EDA Visualizations](white_wine\outputs\01_boxplot_features.png)
 *Figure 1: Box plots showing distribution of all 12 features by quality class*
 
 ![KDE Analysis](outputs\02_kde_critical_features.png)

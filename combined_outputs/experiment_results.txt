@@ -1,0 +1,21 @@
+### Combined Experiment Results ###
+
+                        Accuracy  Precision    Recall  F1-Score   ROC-AUC
+Model                                                                    
+Combined Random Forest  0.843045   0.727273  0.277228  0.401434  0.866095
+XGBoost (Optimized)     0.810150   0.500000  0.702970  0.584362  0.853369
+
+Feature Importances:
+                 Feature  Importance
+10               alcohol    0.380225
+1       volatile acidity    0.086633
+4              chlorides    0.065456
+6   total sulfur dioxide    0.062829
+5    free sulfur dioxide    0.062574
+8                     pH    0.062339
+2            citric acid    0.059089
+7                density    0.058850
+0          fixed acidity    0.055332
+3         residual sugar    0.054853
+9              sulphates    0.051820
+11                  type    0.000000

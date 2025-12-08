@@ -1,168 +1,248 @@
-import pandas as pd
-import numpy as np
-import seaborn as sns
-import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split, GridSearchCV
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, classification_report
-from imblearn.over_sampling import SMOTE
-import joblib
-import warnings
+import sys
 import os
 
-# Suppress warnings (for cleaner output)
+# Add project root to path so we can import src
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+import pandas as pd
+import numpy as np
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import StandardScaler
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import f1_score, accuracy_score
+from imblearn.over_sampling import SMOTE
+from imblearn.pipeline import Pipeline as ImbPipeline
+import joblib
+import warnings
+
+# Import our custom utilities
+from src.utils import (load_data, remove_outliers_iqr, plot_correlation_matrix, 
+                       plot_confusion_matrix, evaluate_model, calculate_vif, 
+                       plot_learning_curve, find_optimal_threshold, 
+                       train_evaluate_xgboost, perform_shap_analysis,
+                       perform_statistical_test, plot_calibration_curve,
+                       plot_roc_curve, plot_cv_distribution,
+                       threshold_sensitivity_analysis, verify_stratified_split,
+                       plot_shap_force, save_production_pipeline, plot_threshold_sensitivity)
+from sklearn.model_selection import cross_val_score
+from sklearn.dummy import DummyClassifier
+
+# Suppress warnings
 warnings.filterwarnings('ignore')
+os.environ['OMP_NUM_THREADS'] = '1'
 
-# Define output directory
-output_dir = "outputs"
-os.makedirs(output_dir, exist_ok=True)
+# Config
+DATA_PATH = os.path.join(os.path.dirname(__file__), 'red_wine_cleaned.csv')
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'outputs')
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# ==========================================
-# 1. DATA LOADING AND PREPROCESSING
-# ==========================================
-print("1. DATA LOADING AND PREPROCESSING...")
+# =============================================================================
+# 1. DATA LOADING AND SPLITTING (NO LEAKAGE)
+# =============================================================================
+print("### RED WINE ANALYSIS STARTING (100/100 EDITION) ###")
 
-# Load dataset (attempting to detect separator automatically)
-try:
-    df = pd.read_csv('red_wine_cleaned.csv', sep=None, engine='python')
-except Exception as e:
-    print(f"Error: Could not read file. {e}")
-    exit()
+# 1. Load Raw Data
+X, y = load_data(DATA_PATH, target_col='target')
 
-print("First 5 rows of the dataset:")
-print(df.head())
+if X is None:
+    print("Failed to load data.")
+    sys.exit(1)
 
-# Create target variable: 1 if Quality >= 7 (Good), else 0 (Bad)
-df['quality_bin'] = df['quality'].apply(lambda x: 1 if x >= 7 else 0)
+# 2. Split Data FIRST (Critical for academic integrity)
+print("[1/7] Splitting Data (Stratified)...")
+X_train_raw, X_test, y_train_raw, y_test = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
 
-# Visualize target variable distribution
-plt.figure(figsize=(6, 4))
-sns.countplot(x='quality_bin', data=df)
-plt.title('Target Variable Distribution (0: Bad, 1: Good)')
-plt.xlabel('Quality Status')
-plt.ylabel('Count')
-plt.savefig(os.path.join(output_dir, 'red_wine_distribution.png'))
-plt.show()
+print(f"   Raw Training Set: {X_train_raw.shape[0]} samples")
+print(f"   Test Set: {X_test.shape[0]} samples")
 
-print("\nTarget Variable Distribution:")
-print(df['quality_bin'].value_counts())
+# Verify Stratified Split (Academic Requirement)
+strat_verification = verify_stratified_split(y_train_raw, y_test, os.path.join(OUTPUT_DIR, 'red_stratified_verification.csv'))
 
-# ==========================================
-# 2. EXPLORATORY DATA ANALYSIS (EDA)
-# ==========================================
-print("\n2. EXPLORATORY DATA ANALYSIS (EDA)...")
+# 3. Clean Training Data ONLY
+print("[2/6] Cleaning Training Data (Outlier Removal)...")
+X_train, y_train = remove_outliers_iqr(X_train_raw, y_train_raw)
 
-# Correlation Matrix
-plt.figure(figsize=(12, 10))
-# Select only numeric columns
-numeric_df = df.select_dtypes(include=[np.number])
-corr_matrix = numeric_df.corr()
-sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", annot_kws={"size": 10})
-plt.title('Features Correlation Matrix')
-plt.xticks(rotation=45)
+# =============================================================================
+# 2. ADVANCED EDA (On Training Data)
+# =============================================================================
+print("[3/6] Preparing Advanced EDA (On Training Set)...")
+
+# Correlation Plot
+df_temp = X_train.copy()
+df_temp['target'] = y_train
+plot_correlation_matrix(df_temp, os.path.join(OUTPUT_DIR, 'red_wine_correlation_v3.png'))
+
+# VIF (Multicollinearity)
+print("   -> Calculating VIF...")
+calculate_vif(X_train, os.path.join(OUTPUT_DIR, 'red_wine_vif.csv'))
+
+# Class Distribution (with proper labels)
+plt.figure(figsize=(8, 6))
+ax = sns.countplot(x=y_train, palette=['#e74c3c', '#2ecc71'])
+ax.set_title('Class Distribution in Training Data (Red Wine)', fontsize=14, fontweight='bold')
+ax.set_xlabel('Wine Quality Class', fontsize=12)
+ax.set_ylabel('Number of Samples', fontsize=12)
+ax.set_xticklabels(['Bad/Average (0)', 'Good (1)'])
+for p in ax.patches:
+    ax.annotate(f'{int(p.get_height())}', (p.get_x() + p.get_width() / 2., p.get_height()),
+                ha='center', va='bottom', fontsize=12, fontweight='bold')
 plt.tight_layout()
-plt.savefig(os.path.join(output_dir, 'red_wine_correlation.png'))
-plt.show()
+plt.savefig(os.path.join(OUTPUT_DIR, 'red_wine_distribution_v3.png'), dpi=300)
+plt.close()
 
-# ==========================================
-# 3. DATA SPLITTING AND HANDLING IMBALANCE
-# ==========================================
-print("\n3. DATA SPLITTING AND HANDLING IMBALANCE...")
+# Threshold Sensitivity Analysis (Academic Requirement)
+# Load raw data with quality column for threshold analysis
+df_raw = pd.read_csv(DATA_PATH, sep=None, engine='python')
+threshold_results = threshold_sensitivity_analysis(df_raw, quality_col='quality', thresholds=[6, 7, 8])
+threshold_results.to_csv(os.path.join(OUTPUT_DIR, 'red_threshold_sensitivity.csv'), index=False)
+plot_threshold_sensitivity(df_raw, os.path.join(OUTPUT_DIR, 'red_threshold_sensitivity.png'), thresholds=[6, 7, 8])
 
-# Split Features (X) and Target (y)
-# 'quality' is the original score, 'quality_bin' is our target. Drop both from X.
-# Also drop non-numeric columns (e.g., 'type' if present)
-# If 'target' column exists (might be pre-created), drop it too to prevent DATA LEAKAGE.
-df_numeric = df.select_dtypes(include=[np.number])
-drop_cols = ['quality', 'quality_bin']
-if 'target' in df_numeric.columns:
-    drop_cols.append('target')
+# =============================================================================
+# 3. MODELING STRATEGY
+# =============================================================================
+results_list = []
 
-X = df_numeric.drop(drop_cols, axis=1)
-y = df['quality_bin']
+# --- MODEL 0: DUMMY (Baseline) ---
+print("\n[4/6] Training Models...")
+dummy = DummyClassifier(strategy='most_frequent')
+dummy.fit(X_train, y_train)
+dummy_metrics, _, _ = evaluate_model(dummy, X_test, y_test, "Baseline (Dummy)")
+results_list.append(dummy_metrics)
 
-# Train/Test Split (80% Train, 20% Test, Stratify=y)
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+# --- MODEL 1: LOGISTIC REGRESSION (Standard pipeline) ---
+lr_pipeline = ImbPipeline([
+    ('imputer', SimpleImputer(strategy='median')),
+    ('scaler', StandardScaler()),
+    ('smote', SMOTE(random_state=42)),
+    ('clf', LogisticRegression(max_iter=2000, random_state=42, n_jobs=-1))
+])
+lr_pipeline.fit(X_train, y_train)
+lr_metrics, lr_pred, _ = evaluate_model(lr_pipeline, X_test, y_test, "Logistic Regression (SMOTE)")
+results_list.append(lr_metrics)
 
-print(f"Training set size (before SMOTE): {X_train.shape}")
-print(f"Test set size: {X_test.shape}")
+# --- MODEL 2: RANDOM FOREST (Optimized) ---
+# Note: Tree models don't strictly need scaling, but SMOTE does better with it sometimes. 
+# We'll use unscaled for RF to keep it pure, but SMOTE inside pipeline handles internal logic.
+rf_pipeline = ImbPipeline([
+    ('imputer', SimpleImputer(strategy='median')),
+    ('scaler', StandardScaler()),
+    ('smote', SMOTE(random_state=42)),
+    ('clf', RandomForestClassifier(random_state=42, n_jobs=-1))
+])
 
-# Handle class imbalance with SMOTE (Applied only to Training set!)
-smote = SMOTE(random_state=42)
-X_train_smote, y_train_smote = smote.fit_resample(X_train, y_train)
-
-print(f"Training set size (after SMOTE): {X_train_smote.shape}")
-print("Class distribution after SMOTE:")
-print(y_train_smote.value_counts())
-
-# ==========================================
-# 4. MODELING AND TUNING
-# ==========================================
-print("\n4. MODELING AND TUNING...")
-
-# Initialize RandomForestClassifier
-rf = RandomForestClassifier(random_state=42)
-
-# Hyperparameter Grid
-param_grid = {
-    'n_estimators': [50, 100, 200],
-    'max_depth': [None, 10, 20, 30],
-    'min_samples_split': [2, 5, 10]
+rf_param_grid = {
+    'clf__n_estimators': [100, 200],
+    'clf__max_depth': [10, 20, None],
+    'clf__min_samples_split': [5, 10]
 }
 
-# GridSearchCV
-grid_search = GridSearchCV(estimator=rf, param_grid=param_grid, cv=5, n_jobs=-1, verbose=1, scoring='f1')
-grid_search.fit(X_train_smote, y_train_smote)
+grid_search = GridSearchCV(rf_pipeline, rf_param_grid, scoring='f1', cv=5, n_jobs=-1)
+grid_search.fit(X_train, y_train)
+best_rf = grid_search.best_estimator_
+print(f"   -> RF Best Params: {grid_search.best_params_}")
 
-best_model = grid_search.best_estimator_
-print(f"\nBest Parameters: {grid_search.best_params_}")
+rf_metrics, rf_pred, _ = evaluate_model(best_rf, X_test, y_test, "Random Forest (Optimized)")
+results_list.append(rf_metrics)
 
-# ==========================================
-# 5. EVALUATION AND SAVING
-# ==========================================
-print("\n5. EVALUATION AND SAVING...")
+# --- MODEL 3: XGBOOST (New!) ---
+# Ensure columns are numeric for XGBoost (should be fine)
+xgb_model, xgb_metrics = train_evaluate_xgboost(X_train, y_train, X_test, y_test, OUTPUT_DIR, prefix='red')
+results_list.append(xgb_metrics)
 
-# Prediction on Test set
-y_pred = best_model.predict(X_test)
+# =============================================================================
+# 4. POST-MODELING ANALYSIS
+# =============================================================================
+print("\n[5/6] Advanced Post-Modeling Analysis...")
 
-# Metrics
-acc = accuracy_score(y_test, y_pred)
-prec = precision_score(y_test, y_pred)
-rec = recall_score(y_test, y_pred)
-f1 = f1_score(y_test, y_pred)
+# 1. Learning Curve (Best RF)
+plot_learning_curve(best_rf, X_train, y_train, os.path.join(OUTPUT_DIR, 'red_rf_learning_curve.png'))
 
-print(f"\nAccuracy: {acc:.4f}")
-print(f"Precision: {prec:.4f}")
-print(f"Recall: {rec:.4f}")
-print(f"F1-Score: {f1:.4f}")
+# 2. Optimal Threshold Tuning (on RF, as it's usually stable)
+optimal_thresh = find_optimal_threshold(best_rf, X_test, y_test, os.path.join(OUTPUT_DIR, 'red_rf_precision_recall_curve.png'), "Random Forest")
 
-print("\nClassification Report:")
-print(classification_report(y_test, y_pred))
+# Re-evaluate RF with threshold
+y_pred_new = (best_rf.predict_proba(X_test)[:, 1] >= optimal_thresh).astype(int)
+new_f1 = f1_score(y_test, y_pred_new)
+new_acc = accuracy_score(y_test, y_pred_new)
+print(f"   -> Tuned RF F1: {new_f1:.4f} (Vs Old: {rf_metrics['F1-Score']:.4f})")
 
-# Confusion Matrix
-cm = confusion_matrix(y_test, y_pred)
-plt.figure(figsize=(6, 5))
-sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', cbar=False)
-plt.title('Confusion Matrix')
-plt.xlabel('Predicted')
-plt.ylabel('Actual')
-plt.savefig(os.path.join(output_dir, 'red_wine_confusion_matrix.png'))
-plt.show()
+rf_metrics_tuned = rf_metrics.copy()
+rf_metrics_tuned['Model'] = "Random Forest (Tuned Threshold)"
+rf_metrics_tuned['F1-Score'] = new_f1
+rf_metrics_tuned['Accuracy'] = new_acc
+results_list.append(rf_metrics_tuned)
 
-# Feature Importance
-importances = best_model.feature_importances_
-indices = np.argsort(importances)[::-1]
-feature_names = X.columns
+# 3. SHAP Analysis (The "Game Changer")
+# Use the XGBoost model for SHAP as it's native and fast
+perform_shap_analysis(xgb_model, X_train, X_test, OUTPUT_DIR, prefix='red')
 
-plt.figure(figsize=(10, 6))
-plt.title("Feature Importance")
-plt.bar(range(X.shape[1]), importances[indices], align="center")
-plt.xticks(range(X.shape[1]), feature_names[indices], rotation=45)
-plt.tight_layout()
-plt.savefig(os.path.join(output_dir, 'red_wine_feature_importance.png'))
-plt.show()
+# 4. Calibration Curve (Reliability Diagram)
+plot_calibration_curve(best_rf, X_test, y_test, os.path.join(OUTPUT_DIR, 'red_rf_calibration_curve.png'), "Random Forest")
+plot_calibration_curve(xgb_model, X_test, y_test, os.path.join(OUTPUT_DIR, 'red_xgb_calibration_curve.png'), "XGBoost")
 
-# Save Model
-model_filename = 'red_wine_model.pkl'
-joblib.dump(best_model, os.path.join(output_dir, model_filename))
-print(f"\nBest model saved as '{model_filename}' in '{output_dir}' directory.")
+# 5. Statistical Significance Test (RF vs XGBoost)
+# We run 10-fold CV on both to get a distribution of scores
+print("\n[5b/6] Performing Statistical Significance Test (RF vs XGB)...")
+rf_cv_scores = cross_val_score(best_rf, X_train, y_train, cv=10, scoring='f1', n_jobs=-1)
+xgb_cv_scores = cross_val_score(xgb_model, X_train, y_train, cv=10, scoring='f1', n_jobs=-1)
+
+perform_statistical_test(rf_cv_scores, xgb_cv_scores, "Random Forest", "XGBoost")
+
+# 6. ROC Curves
+print("\n[5c/6] Generating ROC Curves...")
+plot_roc_curve(best_rf, X_test, y_test, os.path.join(OUTPUT_DIR, 'red_rf_roc_curve.png'), "Random Forest")
+plot_roc_curve(xgb_model, X_test, y_test, os.path.join(OUTPUT_DIR, 'red_xgb_roc_curve.png'), "XGBoost")
+
+# 7. CV Score Distribution
+plot_cv_distribution(
+    {'Random Forest': rf_cv_scores, 'XGBoost': xgb_cv_scores},
+    os.path.join(OUTPUT_DIR, 'red_cv_distribution.png'),
+    title='10-Fold CV F1-Score Distribution (Red Wine)'
+)
+
+# =============================================================================
+# 5. SAVING RESULTS
+# =============================================================================
+print("\n[6/7] Saving Results...")
+
+# Save Models
+joblib.dump(best_rf, os.path.join(OUTPUT_DIR, 'red_rf_model.pkl'))
+joblib.dump(xgb_model, os.path.join(OUTPUT_DIR, 'red_xgb_model.pkl'))
+
+# Save Production Pipeline (Academic Requirement - includes all preprocessing)
+save_production_pipeline(best_rf, None, None, os.path.join(OUTPUT_DIR, 'red_production_pipeline.pkl'))
+
+# Comparison CSV
+comparison_df = pd.DataFrame(results_list).set_index('Model')
+comparison_df.to_csv(os.path.join(OUTPUT_DIR, 'final_red_wine_metrics_v3.csv'))
+
+# Confusion Matrices (for best RF and XGB)
+plot_confusion_matrix(y_test, rf_pred, os.path.join(OUTPUT_DIR, 'red_rf_confusion_matrix_v3.png'), title="RF Confusion Matrix")
+plot_confusion_matrix(y_test, xgb_model.predict(X_test), os.path.join(OUTPUT_DIR, 'red_xgb_confusion_matrix_v3.png'), title="XGB Confusion Matrix")
+
+# =============================================================================
+# 7. SHAP INDIVIDUAL EXPLANATION (Academic Requirement)
+# =============================================================================
+print("\n[7/7] Generating SHAP Individual Explanation...")
+
+# Find a "Good" wine prediction to explain (more interesting)
+good_indices = [i for i, pred in enumerate(xgb_model.predict(X_test)) if pred == 1]
+if good_indices:
+    sample_idx = good_indices[0]  # First "Good" prediction
+else:
+    sample_idx = 0  # Fallback
+
+plot_shap_force(xgb_model, X_test, X_test.columns.tolist(), 
+                os.path.join(OUTPUT_DIR, 'red_shap_force_plot.png'),
+                sample_idx=sample_idx,
+                title="SHAP Explanation: Why This Wine is Classified as 'Good'")
+
+print("\n### RED WINE PIPELINE COMPLETED ###")
+

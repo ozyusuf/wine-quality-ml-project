@@ -1,0 +1,14 @@
+# Wine Quality Classification - Dependencies
+# For reproducibility, versions are pinned with upper bounds
+
+pandas>=1.5.0,<3.0.0
+numpy>=1.23.0,<2.0.0
+matplotlib>=3.6.0,<4.0.0
+seaborn>=0.12.0,<1.0.0
+scikit-learn>=1.3.0,<2.0.0
+xgboost>=2.0.0,<3.0.0
+shap>=0.42.0,<1.0.0
+imbalanced-learn>=0.10.0,<1.0.0
+statsmodels>=0.14.0,<1.0.0
+joblib>=1.2.0,<2.0.0
+scipy>=1.10.0,<2.0.0

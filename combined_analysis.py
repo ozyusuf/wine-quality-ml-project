@@ -1,9 +1,6 @@
 import sys
 import os
-
-# Add project root to path so we can import src
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
+import joblib
 import pandas as pd
 import numpy as np
 import matplotlib
@@ -11,167 +8,158 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
 from sklearn.impute import SimpleImputer
-from sklearn.metrics import accuracy_score, f1_score
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 import xgboost as xgb
-import joblib
 import warnings
 
-# Import our custom utilities
-from src.utils import (load_data, remove_outliers_iqr, evaluate_model, perform_shap_analysis, 
-                       plot_confusion_matrix, plot_calibration_curve, perform_statistical_test,
-                       plot_roc_curve, plot_cv_distribution, plot_learning_curve,
-                       verify_stratified_split, plot_shap_force, save_production_pipeline)
-from sklearn.model_selection import cross_val_score
+# Add project root to path to verify imports work correctly
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+# Import custom utility functions
+from src.utils import (load_data_for_score, load_data_for_type, evaluate_model,
+                       plot_actual_vs_predicted, plot_residuals, plot_confusion_matrix,
+                       plot_roc_curve, plot_correlation_matrix, plot_learning_curve,
+                       plot_xgboost_loss_curve)
 
 warnings.filterwarnings('ignore')
 os.environ['OMP_NUM_THREADS'] = '1'
 
-# Config
+# Configuration Paths
 RED_PATH = os.path.join(os.path.dirname(__file__), 'red_wine', 'red_wine_cleaned.csv')
 WHITE_PATH = os.path.join(os.path.dirname(__file__), 'white_wine', 'white_wine_cleaned.csv')
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'combined_outputs')
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-print("### COMBINED WINE ANALYSIS EXPERIMENT ###")
+def run_score_prediction():
+    """
+    Executes the Score Prediction workflow (Regression task).
+    Predicts wine quality score (0-10) based on chemical features.
+    """
+    print("\n" + "="*50)
+    print("### TASK 1: SCORE PREDICTION (REGRESSION) ###")
+    print("="*50)
+    
+    # 1. Load Data
+    X, y = load_data_for_score(RED_PATH, WHITE_PATH)
+    if X is None: return
 
-# 1. Load Data (Raw)
-X_red, y_red = load_data(RED_PATH, target_col='target') 
-X_white, y_white = load_data(WHITE_PATH, target_col='target')
+    # 2. Split Data
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    
+    # 3. Model 1: Random Forest Regressor
+    print("\nTraining Random Forest Regressor...")
+    rf_reg = Pipeline([
+        ('imputer', SimpleImputer(strategy='median')),
+        ('scaler', StandardScaler()),
+        ('reg', RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1))
+    ])
+    rf_reg.fit(X_train, y_train)
+    rf_metrics, rf_pred, _ = evaluate_model(rf_reg, X_test, y_test, "RF Regressor", task_type='regression')
+    
+    # 4. Model 2: XGBoost Regressor
+    print("\nTraining XGBoost Regressor...")
+    xgb_reg = xgb.XGBRegressor(n_estimators=200, learning_rate=0.1, max_depth=6, random_state=42, n_jobs=-1)
+    # Fit with eval_set to track loss over iterations
+    xgb_reg.fit(X_train, y_train, eval_set=[(X_train, y_train), (X_test, y_test)], verbose=False)
+    xgb_metrics, xgb_pred, _ = evaluate_model(xgb_reg, X_test, y_test, "XGB Regressor", task_type='regression')
+    
+    # 5. Visualizations (Using the Best Model)
+    # XGBoost is typically chosen for detailed plotting here
+    best_pred = xgb_pred
+    best_model_name = "XGBoost"
+    
+    print("\nGenerating Regression Plots...")
+    plot_actual_vs_predicted(y_test, best_pred, os.path.join(OUTPUT_DIR, 'score_actual_vs_pred.png'), title=f"{best_model_name}: Actual vs Predicted Score")
+    plot_residuals(y_test, best_pred, os.path.join(OUTPUT_DIR, 'score_residuals.png'), title=f"{best_model_name}: Residuals")
+    
+    # Learning Curve (New for GitHub Requirements)
+    print("Generating Learning Curve...")
+    plot_learning_curve(xgb_reg, X_train, y_train, os.path.join(OUTPUT_DIR, 'score_learning_curve.png'), 
+                        title=f"Learning Curve ({best_model_name})", scoring='r2', ylabel='R2 Score')
 
-if X_red is None or X_white is None:
-    print("Failed to load datasets.")
-    sys.exit(1)
+    # Loss Curve (New for GitHub Requirements - "Loss ve Accuracy eğrileri")
+    print("Generating Loss Curve...")
+    plot_xgboost_loss_curve(xgb_reg, os.path.join(OUTPUT_DIR, 'score_loss_curve.png'), title=f"{best_model_name} Training Loss (RMSE)")
+    
+    # Save Feature Importance (XGBoost)
+    feature_importances = pd.DataFrame({
+        'Feature': X.columns,
+        'Importance': xgb_reg.feature_importances_
+    }).sort_values('Importance', ascending=False)
+    
+    plt.figure(figsize=(10, 6))
+    sns.barplot(x='Importance', y='Feature', data=feature_importances.head(10), palette='viridis')
+    plt.title('Top 10 Feature Importances (Score Prediction)', fontsize=14)
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR, 'score_feature_importance.png'), dpi=300)
+    plt.close()
+    
+    # Save Metrics Comparison
+    res_df = pd.DataFrame([rf_metrics, xgb_metrics])
+    res_df.to_csv(os.path.join(OUTPUT_DIR, 'score_model_comparison.csv'), index=False)
+    print("\n   -> Score Prediction Task Completed.")
 
-# Add 'type' Feature
-X_red['type'] = 0 # Red
-X_white['type'] = 1 # White
+def run_type_prediction():
+    """
+    Executes the Type Prediction workflow (Classification task).
+    Predicts if the wine is Red or White.
+    """
+    print("\n" + "="*50)
+    print("### TASK 2: TYPE PREDICTION (CLASSIFICATION) ###")
+    print("="*50)
+    
+    # 1. Load Data
+    # Dataset conventions: Red=0, White=1
+    X, y = load_data_for_type(RED_PATH, WHITE_PATH) 
+    if X is None: return
 
-# 2. Combine Datasets
-X_combined = pd.concat([X_red, X_white], axis=0, ignore_index=True)
-y_combined = pd.concat([y_red, y_white], axis=0, ignore_index=True)
+    # 2. Split Data (Stratified to maintain class balance)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
+    
+    # 3. Model: Random Forest Classifier
+    print("\nTraining Random Forest Classifier...")
+    rf_clf = Pipeline([
+        ('imputer', SimpleImputer(strategy='median')),
+        ('scaler', StandardScaler()),
+        ('clf', RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1))
+    ])
+    rf_clf.fit(X_train, y_train)
+    rf_metrics, rf_pred, _ = evaluate_model(rf_clf, X_test, y_test, "RF Classifier", task_type='classification')
+    
+    # 4. Visualizations
+    print("\nGenerating Classification Plots...")
+    plot_confusion_matrix(y_test, rf_pred, os.path.join(OUTPUT_DIR, 'type_confusion_matrix.png'), title="Type Prediction Confusion Matrix")
+    plot_roc_curve(rf_clf, X_test, y_test, os.path.join(OUTPUT_DIR, 'type_roc_curve.png'), "RF Classifier")
+    
+    # Learning Curve (New for GitHub Requirements)
+    print("Generating Learning Curve...")
+    plot_learning_curve(rf_clf, X_train, y_train, os.path.join(OUTPUT_DIR, 'type_learning_curve.png'), 
+                        title="Learning Curve (RF Classifier)", scoring='f1', ylabel='F1 Score')
+    
+    # Feature Importance (Extracted from the Pipeline's classifier step)
+    rf_model = rf_clf.named_steps['clf']
+    feature_importances = pd.DataFrame({
+        'Feature': X.columns,
+        'Importance': rf_model.feature_importances_
+    }).sort_values('Importance', ascending=False)
+    
+    plt.figure(figsize=(10, 6))
+    sns.barplot(x='Importance', y='Feature', data=feature_importances.head(10), palette='magma')
+    plt.title('What makes a wine Red vs White? (Feature Importance)', fontsize=14)
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR, 'type_feature_importance.png'), dpi=300)
+    plt.close()
+    
+    # Save Metrics
+    res_df = pd.DataFrame([rf_metrics])
+    res_df.to_csv(os.path.join(OUTPUT_DIR, 'type_model_metrics.csv'), index=False)
+    print("\n   -> Type Prediction Task Completed.")
 
-print(f"Combined Shape: {X_combined.shape}")
-
-# 3. Split BEFORE Cleaning
-X_train_raw, X_test, y_train_raw, y_test = train_test_split(X_combined, y_combined, test_size=0.2, stratify=y_combined, random_state=42)
-
-# Verify Stratified Split (Academic Requirement)
-strat_verification = verify_stratified_split(y_train_raw, y_test, os.path.join(OUTPUT_DIR, 'combined_stratified_verification.csv'))
-
-# 4. Clean Training Data
-print("Cleaning Training Data...")
-X_train, y_train = remove_outliers_iqr(X_train_raw, y_train_raw)
-
-# 5a. Combined Correlation Matrix
-print("\nGenerating Combined Correlation Matrix...")
-df_corr_combined = X_combined.copy()
-df_corr_combined['target'] = y_combined
-from src.utils import plot_correlation_matrix
-plot_correlation_matrix(df_corr_combined, os.path.join(OUTPUT_DIR, 'combined_correlation_heatmap.png'), title="Combined Wine Correlation")
-
-# Initialize results list
-results_list = []
-
-# 5b. Model Training: Random Forest (Comparison)
-print("\nTraining Random Forest on Combined Data...")
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
-
-rf_pipeline = Pipeline([
-    ('imputer', SimpleImputer(strategy='median')),
-    ('scaler', StandardScaler()), # Use scaler for consistency with other scripts
-    ('clf', RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1, class_weight='balanced'))
-])
-rf_pipeline.fit(X_train, y_train)
-rf_metrics, rf_pred, _ = evaluate_model(rf_pipeline, X_test, y_test, "Combined Random Forest")
-results_list.append(rf_metrics)
-
-# 5c. Model Training: XGBoost (Optimized)
-# Note: optimize=True will run GridSearch (may take a few mins)
-from src.utils import train_evaluate_xgboost
-xgb_model, xgb_metrics = train_evaluate_xgboost(X_train, y_train, X_test, y_test, OUTPUT_DIR, prefix='combined', optimize=True)
-results_list.append(xgb_metrics)
-
-# 6. Evaluation & Comparison
-print("\n### Comparison Results ###")
-comparison_df = pd.DataFrame(results_list).set_index('Model')
-print(comparison_df)
-comparison_df.to_csv(os.path.join(OUTPUT_DIR, 'combined_model_comparison.csv'))
-
-# Plot Confusion Matrix (Best Model - XGBoost)
-plot_confusion_matrix(y_test, xgb_model.predict(X_test), os.path.join(OUTPUT_DIR, 'combined_confusion_matrix.png'), title="Combined XGB Confusion Matrix")
-
-# 7. Feature Importance & SHAP
-# Standard Importance (from XGBoost)
-feature_importances = pd.DataFrame({
-    'Feature': X_combined.columns,
-    'Importance': xgb_model.feature_importances_
-}).sort_values('Importance', ascending=False)
-
-print("\nTop Feature Importances (XGBoost):")
-print(feature_importances)
-
-plt.figure(figsize=(10, 6))
-sns.barplot(x='Importance', y='Feature', data=feature_importances, palette='cool')
-plt.title('Feature Importance (Combined: Is Type Important?)', fontsize=14)
-plt.tight_layout()
-plt.savefig(os.path.join(OUTPUT_DIR, 'combined_feature_importance.png'), dpi=300)
-plt.close()
-
-# SHAP
-perform_shap_analysis(xgb_model, X_train, X_test, OUTPUT_DIR, prefix='combined')
-
-# Calibration Curve
-plot_calibration_curve(rf_pipeline, X_test, y_test, os.path.join(OUTPUT_DIR, 'combined_rf_calibration_curve.png'), "Random Forest")
-plot_calibration_curve(xgb_model, X_test, y_test, os.path.join(OUTPUT_DIR, 'combined_xgb_calibration_curve.png'), "XGBoost")
-
-# Statistical Test (RF vs XGB)
-print("\nPerforming Statistical Significance Test (RF vs XGB)...")
-rf_cv_scores = cross_val_score(rf_pipeline, X_train, y_train, cv=10, scoring='f1', n_jobs=-1)
-xgb_cv_scores = cross_val_score(xgb_model, X_train, y_train, cv=10, scoring='f1', n_jobs=-1)
-
-perform_statistical_test(rf_cv_scores, xgb_cv_scores, "Random Forest", "XGBoost")
-
-# Learning Curve - NEW
-print("\nGenerating Learning Curve...")
-plot_learning_curve(rf_pipeline, X_train, y_train, os.path.join(OUTPUT_DIR, 'combined_rf_learning_curve.png'), title="Learning Curve (Combined RF)")
-
-# ROC Curves - NEW
-print("\nGenerating ROC Curves...")
-plot_roc_curve(rf_pipeline, X_test, y_test, os.path.join(OUTPUT_DIR, 'combined_rf_roc_curve.png'), "Random Forest")
-plot_roc_curve(xgb_model, X_test, y_test, os.path.join(OUTPUT_DIR, 'combined_xgb_roc_curve.png'), "XGBoost")
-
-# CV Score Distribution - NEW
-plot_cv_distribution(
-    {'Random Forest': rf_cv_scores, 'XGBoost': xgb_cv_scores},
-    os.path.join(OUTPUT_DIR, 'combined_cv_distribution.png'),
-    title='10-Fold CV F1-Score Distribution (Combined)'
-)
-
-# Save Results Text
-with open(os.path.join(OUTPUT_DIR, 'experiment_results.txt'), 'w', encoding='utf-8') as f:
-    f.write("### Combined Experiment Results ###\n\n")
-    f.write(comparison_df.to_string())
-    f.write("\n\nFeature Importances:\n")
-    f.write(feature_importances.to_string())
-
-# Save Production Pipeline (Academic Requirement)
-save_production_pipeline(xgb_model, None, None, os.path.join(OUTPUT_DIR, 'combined_production_pipeline.pkl'))
-
-# SHAP Individual Explanation (Academic Requirement)
-print("\nGenerating SHAP Individual Explanation...")
-good_indices = [i for i, pred in enumerate(xgb_model.predict(X_test)) if pred == 1]
-if good_indices:
-    sample_idx = good_indices[0]
-else:
-    sample_idx = 0
-
-plot_shap_force(xgb_model, X_test, X_test.columns.tolist(), 
-                os.path.join(OUTPUT_DIR, 'combined_shap_force_plot.png'),
-                sample_idx=sample_idx,
-                title="SHAP Explanation: Why This Wine is 'Good' (Combined Model)")
-
-print("\n### COMBINED EXPERIMENT COMPLETED ###")
-
+if __name__ == "__main__":
+    run_score_prediction()
+    run_type_prediction()
+    print("\nAll tasks completed successfully.")

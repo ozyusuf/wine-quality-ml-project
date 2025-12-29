@@ -1,0 +1,3 @@
+Class,Train Count,Train %,Test Count,Test %,Diff (pp)
+Bad/Avg (0),3449,81.04%,862,81.02%,0.02
+Good (1),807,18.96%,202,18.98%,0.02
